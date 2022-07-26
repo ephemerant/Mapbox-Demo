@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Mapbox Demo</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.9.2/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.9.2/mapbox-gl.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+        }
+
+        #controls {
+            position: fixed;
+            top: 8px;
+            left: 8px;
+            width: 350px;
+            padding: 8px 12px;
+            background: white;
+            z-index: 1;
+            box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+            border-radius: 4px;
+        }
+
+        #controls>*+* {
+            margin-top: 8px;
+        }
+
+        #controls label {
+            cursor: pointer;
+            display: inline-block;
+        }
+
+        #controls button {
+            cursor: pointer;
+            background-color: #07a;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 12px;
+        }
+
+        #controls button:hover {
+            background-color: #08c;
+        }
+
+        #controls button:active {
+            outline: 2px solid black;
+        }
+
+        #controls input[type=number] {
+            border: 1px solid black;
+            border-radius: 4px;
+            padding: 4px;
+        }
+
+        .lat-lng-wrapper {
+            display: flex;
+        }
+
+        .lat-lng-wrapper>* {
+            width: 100%;
+        }
+
+        .lat-lng-wrapper>*+* {
+            margin-left: 8px;
+        }
+
+        .lat-lng-wrapper>*>* {
+            width: 100%;
+        }
+
+        .lat-lng-wrapper>button {
+            width: auto;
+        }
+
+        img.conditions-icon {
+            filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+            height: 48px;
+            margin-bottom: -24px;
+            margin-top: -10px;
+        }
+
+        .weather-conditions>table {
+            text-align: left;
+        }
+
+        .weather-conditions>table td {
+            padding-left: 16px;
+        }
+
+        span[title] {
+            border-bottom: 1px dotted #777;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="controls">
+        <form class="lat-lng-wrapper" onsubmit="event.preventDefault(); refreshLatLng(); centerMap(); checkWeather();">
+            <label>
+                Latitude
+                <input id="latitude" type="number" step="any">
+            </label>
+
+            <label>
+                Longitude
+                <input id="longitude" type="number" step="any">
+            </label>
+
+            <button type="submit">
+                Check<br>
+                Weather
+            </button>
+        </form>
+
+        <label>
+            <input type="checkbox" checked onchange="setContourLines(this)">
+            Display 10,000'+ contour lines
+        </label>
+    </div>
+
+    <div id="map"></div>
+
+    <script>
+        mapboxgl.accessToken = 'pk.eyJ1IjoiZXBoZW1lcmFudCIsImEiOiJjazl4bjJhcTgwbHg5M3JudGNwMGx1eGM3In0.idOPxNr9BkzmErWymtADsw';
+        const openWeatherKey = '05212b04392933fdf6d545cdf701b628';
+
+        let [lng, lat] = [-105.0423, 38.8409];
+
+        const latInput = document.getElementById('latitude');
+        const lngInput = document.getElementById('longitude');
+
+        refreshLatLngInputs();
+
+        const weatherMarker = new mapboxgl.Marker();
+        const weatherPopup = new mapboxgl.Popup({ maxWidth: '300px' });
+
+        // init map
+        const map = new mapboxgl.Map({
+            container: 'map',
+            style: 'mapbox://styles/mapbox/outdoors-v11',
+            center: [lng, lat],
+            zoom: 10
+        });
+
+        // additionally configure map once it's loaded
+        map.on('load', () => {
+            // add terrain source for contours
+            map.addSource('terrain', {
+                type: 'vector',
+                url: 'mapbox://mapbox.mapbox-terrain-v2'
+            });
+
+            // add layer to display contour lines >= 10,000' (3048m)
+            map.addLayer({
+                id: 'contours',
+                source: 'terrain',
+                'source-layer': 'contour',
+                type: 'line',
+                paint: {
+                    'line-color': '#00f' // blue lines
+                },
+                filter: ['>=', 'ele', 3048]
+            });
+
+            map.on('click', e => {
+                lng = e.lngLat.lng;
+                lat = e.lngLat.lat;
+
+                refreshLatLngInputs();
+
+                checkWeather();
+            });
+        });
+
+        // update local variables with input values
+        function refreshLatLng() {
+            lat = latInput.value;
+            lng = lngInput.value;
+        }
+
+        // update input values with local variables
+        function refreshLatLngInputs() {
+            latInput.value = lat;
+            lngInput.value = lng;
+        }
+
+        // center map around local lat/lng variables
+        function centerMap() {
+            map.panTo([lng, lat]);
+        }
+
+        function capitalizeFirst(str) {
+            return str[0].toUpperCase() + str.slice(1);
+        }
+
+        function checkWeather() {
+            weatherMarker.setLngLat([lng, lat]).addTo(map);
+
+            weatherPopup.setText('Checking weather...');
+            weatherMarker.setPopup(weatherPopup).togglePopup();
+
+            const weatherEndPoint = `https://api.openweathermap.org/data/2.5/weather?lon=${lng}&lat=${lat}&units=imperial&appid=${openWeatherKey}`;
+
+            fetch(weatherEndPoint)
+                .then((response) => response.json())
+                .then((data) => {
+                    let conditionsTitle = capitalizeFirst(data.weather[0].description);
+
+                    // only show description if it differs from main
+                    if (conditionsTitle === data.weather[0].main)
+                        conditionsTitle = '';
+                    else
+                        conditionsTitle = `title="${conditionsTitle}"`;
+
+                    let temperatureTitle = Math.round(data.main.feels_like);
+
+                    // only show feels like if it differs from the actual temperature
+                    if (temperatureTitle === Math.round(data.main.temp))
+                        temperatureTitle = '';
+                    else
+                        temperatureTitle = `title="Feels like ${temperatureTitle}"`;
+
+                    const html = `
+<div class="weather-conditions">
+    <table>
+        <tr>
+            <th>Weather</th>
+            <td>
+                <span ${conditionsTitle}>
+                    ${data.weather[0].main}
+                </span>
+                <img class="conditions-icon" src="http://openweathermap.org/img/wn/${data.weather[0].icon}@2x.png">
+            </td>
+        </tr>
+        <tr>
+            <th>Temperature</th>
+            <td>
+                <span ${temperatureTitle}>
+                    ${Math.round(data.main.temp)}
+                    °F
+                </span>
+            </td>
+        </tr>
+        <tr>
+            <th>Humidity</th>
+            <td>${data.main.humidity}%</td>
+        </tr>
+        <tr>
+            <th>Wind</th>
+            <td>
+                <span title="${data.wind.deg} degrees">
+                    ${Math.round(data.wind.speed)} mph
+                </span>
+                <svg style="transform: rotate(${data.wind.deg}deg); margin-bottom: -8px;"
+                    viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                </svg>
+            </td>
+        </tr>
+        <tr>
+            <th>Sunrise</th>
+            <td>${new Date(data.sys.sunrise * 1000).toLocaleString('default', { hour: 'numeric', minute: 'numeric' })}</td>
+        </tr>
+        <tr>
+            <th>Sunset</th>
+            <td>${new Date(data.sys.sunset * 1000).toLocaleString('default', { hour: 'numeric', minute: 'numeric' })}</td>
+        </tr>
+    </table>
+</div>
+                `;
+
+                    weatherPopup.setHTML(html);
+                });
+        }
+
+        // set visibilty of contour lines based on the given checkbox's state
+        function setContourLines(checkbox) {
+            const visibility = checkbox.checked ? 'visible' : 'none';
+
+            map.setLayoutProperty('contours', 'visibility', visibility);
+        }
+    </script>
+
+</body>
+
+</html>
